@@ -51,6 +51,7 @@ def main():
             for x in loaded_json:
                 if (str(loaded_json[x]) == str(['tcp://0.0.0.0:2375'])):
                     print(bcolors.WARNING + "   Root access: Docker daemon can be publicly accessed, root access to host possible" + bcolors.ENDC)
+            print("\n👍 Docker Deamon is not publicly accessable!")
         #file does not exist
         else:
             print(bcolors.WARNING + "     Daemon.json file not found" + bcolors.ENDC)
@@ -123,7 +124,7 @@ def main():
                 devices.append(result)
 
         f.close()
-
+        print(devices)
         if devices != 0:
             print(bcolors.WARNING + "Containers can access the following devices: " + ', '.join(devices) + bcolors.ENDC)
 

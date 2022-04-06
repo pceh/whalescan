@@ -1,0 +1,14 @@
+# UPDATES 06-04-2022
+################################################################################################################
+# Removed ps1 output (result.txt) logic
+# Changed JSON output docker_version_checks
+# Added functionality to only scan newest image (cve_check)
+# Updated new DotNet issues link (cve_check)
+# Changed CVE Regex for newer versions (CVE-[0-9]{4}-[0-9]{5})
+# Updated source of EOL check (https://github.com/dotnet/core/blob/main/releases.md) (BeautifulSoup[array_item])
+# Replaced SecurityOpt setting check with Privileged check (container_scan)
+# Updated DOS checker to check WorkingDir instead of DockerRootDir
+# Changed pending update functionality to "work" without PS and file system access
+# Added comparison between used and latest .NET versions
+# Added run options (cicd / full)
+# Added functionality to check current running user (echo %username%)

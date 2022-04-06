@@ -52,22 +52,25 @@ def main(image):
     def dotnetCVEs(version):
 
         # Parse CVEs from advisory page
-        url = 'https://github.com/dotnet/announcements/issues?q=is%3Aopen+is%3Aissue+label%3A%22.NET+Core+' + version[0:3] + '%22+label%3ASecurity'
+        url = 'https://github.com/dotnet/announcements/issues?q=is%3Aopen+is%3Aissue+label%3A%22.NET+' + version[0:3] + '%22+label%3ASecurity'
+        #url = 'https://github.com/dotnet/announcements/issues?q=is%3Aopen+is%3Aissue+label%3A%22.NET+5.0%22+label%3ASecurity'
         page = requests.get(url)
         soup = BeautifulSoup(page.content, 'html.parser')
 
         main_content = soup.find('div', attrs={'class': 'Box mt-3 Box--responsive hx_Box--firstRowRounded0'})
         content = str(main_content.find('div', attrs={'aria-label': 'Issues'}))
 
-        name_pattern = re.compile(r'CVE-[0-9]{4}-[0-9]{4}')
+        name_pattern = re.compile(r'CVE-[0-9]{4}-[0-9]{5}')
         #initialise dict of CVE ID and relevant information
         CVEs = dict(dict.fromkeys(name_pattern.findall(content)))
-
+        t = ""
         if CVEs != None:
-            print(bcolors.FAIL + "Found following CVEs for .NET version " + version + bcolors.ENDC)
-
+            
+            print("\n[#] Fetching data...")
+            print(bcolors.FAIL + "Found following CVEs for .NET version " + version + " (NOTE: If your version is up-to-date, it most likely won't affect you)" +bcolors.ENDC)
             #get more detail for the CVEs and save it to a dict [CVE: {cve info}]
             for c in CVEs:
+                
                 #query nvd advisory for information relating to CVE IS
                 url = 'https://services.nvd.nist.gov/rest/json/cve/1.0/' + c
                 response = requests.get(url)
@@ -107,12 +110,12 @@ def main(image):
     def checkifEOL(versionUsed):
 
         # check if it is end of life
-        EOLversions = []
-        url = 'https://github.com/dotnet/core/blob/master/microsoft-support.md'
+        LatestVersions = []
+        url = 'https://github.com/dotnet/core/blob/main/releases.md'
         page = requests.get(url)
         soup = BeautifulSoup(page.content, 'html.parser')
 
-        main_content = soup.findAll('table')[1]
+        main_content = soup.findAll('table')[0]
         tbody = main_content.findAll('tbody')
 
         #get array of EOL versions
@@ -120,16 +123,17 @@ def main(image):
             tr = tr.findAll("tr")
             # print(tr)
             for each_tr in tr:
-                versionString = each_tr.findAll("td")[0].text
-                version = versionString[-3:]
-                EOLversions.append(version)
-
+                versionString = each_tr.findAll("td")[3].text
+                #print(versionString)
+                #version = versionString[0:6]
+                LatestVersions.append(versionString)
+        #print(LatestVersions)
         #print warning if current version is EOL
-        if versionUsed in EOLversions:
-            print(bcolors.FAIL + "Using end of life .NET version!" + bcolors.ENDC)
-
-    def test(container):
-        print(container.id[:12] + "aaaaaaaaaaaaaaa")
+        if versionUsed not in LatestVersions:
+            # Note: LatestVersions[2] index is hardcoded, so need to fix that in the future
+            print(bcolors.FAIL + "\n⛔ Using out-dated .NET version! Using: " + versionUsed + " while latest is: " + LatestVersions[2] + bcolors.ENDC)
+        else:
+            print("\n👍 Using up-to-date .NET version: " + versionUsed)
 
     if(cli.inspect_image(image.id)['Config']['Env'] != None):
         if ('DOTNET_RUNNING_IN_CONTAINER=true' in cli.inspect_image(image.id)['Config']['Env']):
@@ -156,8 +160,13 @@ def main(image):
                 start = "DOTNET_VERSION="
                 end = "'"
                 s = version
-                version = (s.split(start))[1].split(end)[0][0:3]
-                checkifEOL(version)
-                dotnetCVEs(version)
+                #Parsing to 5.0 (instead of full version 5.0.15) here, so I can search for the github issues
+                versionTrim = (s.split(start))[1].split(end)[0][0:3]
+                #Parsing to 5.0.15 (instead of ['DOTNET_VERSION=5.0.15'])
+                versionParse = s[s.index("=")+1:s.index("]")-1]
+
+                checkifEOL(versionParse)
+                
+                dotnetCVEs(versionTrim)
 
 
