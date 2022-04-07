@@ -99,7 +99,6 @@ def main():
                     # get more detail for the CVEs and save it to a dict [CVE: {cve info}]
                     for c in CVEs:
                         # query nvd advisory for information relating to CVE
-                        print(c)
                         url = 'https://services.nvd.nist.gov/rest/json/cve/1.0/' + c
                         response = requests.get(url)
                         json_data = json.loads(response.text)

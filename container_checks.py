@@ -14,7 +14,6 @@ import json
 import re
 import urllib
 from urllib.request import urlopen
-from flask import current_app
 import nltk
 import requests
 from bs4 import BeautifulSoup
@@ -50,81 +49,94 @@ def main(container):
     def checkNewPrivileges(container):
         print("\n[#] Checking if container can gain new privileges...")
 
-        #mapping docker inspect command output
         host_config = APIClient.inspect_container(container.id)['HostConfig']
-        config = APIClient.inspect_container(container.id)['Config']
-        
-        #Check current running user
-        #Using /C to auto terminate the session
-        cmdOut = str(container.exec_run("cmd.exe /C echo %username%"))
-        #Parse to username
-        currentUser = cmdOut[cmdOut.index('\'')+1:cmdOut.index('\\')]
+        #pp.pprint(host_config)
 
-        if "Admin" in currentUser:
-            print(bcolors.WARNING + "\n⛔ You're running with elevated privileges! Only run as " + currentUser + " if it's really necessary!" + bcolors.ENDC)
-        #Check if ran with --privileged
-        if host_config.get("Privileged") == True:
-            print(bcolors.WARNING + "\n⛔ Are you sure you want to run your container in PRIVILEGED mode? Try to avoid this as much as possible..." + bcolors.ENDC)
-        else:
-            print("\n👍 Container is not running in privileged mode (--privileged)")
+        sec_op_value = host_config.get("SecurityOpt")
+        if sec_op_value == None:
+            print(bcolors.WARNING + "   Privilege escalation: Security options not set - processes are able to gain additional privileges" + bcolors.ENDC)
 
     #check whether docker services are mapped to any sensitive ports
     def checkDockerPortMappings(container):
+
         cli = docker.APIClient(base_url='')
-        port_mappings = cli.port(container.id, 5000)
+
+        port_mappings = cli.port(container.id, 80)
         if port_mappings != None:
             for p in port_mappings:
                 if((p['HostIp'] == '0.0.0.0') & ([p['HostPort'] == '2375'])):
-                    print(bcolors.WARNING + "\n⛔ Docker daemon is listening on " + p['HostPort'] + bcolors.ENDC)
-        else:
-            print("\n👍 Good news, the docker deamon is not pubicly accessable")
+                    print(bcolors.WARNING + "Docker daemon is listening on " + p['HostPort'] + bcolors.ENDC)
+
 
     #check logical drives storing containers
     def checkContainerStorage(container):
         print("\n[#] Checking container storage... ")
-        host_config = APIClient.inspect_container(container.id)['Config']
 
         container_info = client.info()
-        logical_drive = host_config.get('WorkingDir')[0:3]
+        logical_drive = container_info.get('DockerRootDir')[0:3]
         if(logical_drive == "C:\\"):
-            print(bcolors.WARNING + "\n⛔ Potential DoS: An attacker could fill up the C:\ drive, causing containers and the host itself to become unresponsive")
-            print("Consider using another drive in your Dockerfile (ex. VOLUME [\"D:\"])" + bcolors.ENDC)
+            print(bcolors.WARNING + "   Potential DoS: Under attack, the C: drive could fill up, causing containers and the host itself to become unresponsive" + bcolors.ENDC)
 
     def checkIsolation(container):
-        host_config = APIClient.inspect_container(container.id)['HostConfig']
 
-        output = host_config.get("Isolation")
+        string = 'docker inspect --format={{.HostConfig.Isolation}} ' + container.id[:12]
+        result = subprocess.getoutput(string)
+        if result == 'process':
+            print(bcolors.WARNING + "\n   Container " + container.id[:12] + ' running as process' + bcolors.ENDC)
 
-        if output != 'hyperv':
-            print(bcolors.WARNING + "\n⛔ Container " + container.id + ' is not running in isolation (Hyper-V)' + bcolors.ENDC)
-        else:
-            print("\n👍 Container is running in Isolation using Hyper-V")
     def checkPendingUpdates(container):
         print("\n[#] Checking if there are any pending updates... ")
 
         pending_updates = []
 
-        hostVersionCmd = 'ver'
-        foo = subprocess.getoutput(hostVersionCmd)
+        #copy update scanning script to container
+        copy = 'docker cp update-scan.ps1 ' + container.id + ':\\update-scan.ps1'
+        subprocess.getoutput(copy)
 
-        #Format output to compareable int, example:  [Version 10.0.17763.1817] Becomes 100177631817
-        hostVersion = foo[foo.index('[')+1:foo.index(']')]
-        hostVersionInt = int(foo[foo.index('[')+9:foo.index(']')].replace(".", ""))
+        #run script
+        run = 'docker exec ' + container.id + ' powershell.exe ".\\update-scan.ps1"'
+        subprocess.getoutput(run)
 
-        #This is the WRONG way to execute a command in container, but it still gives the version (cmd.exe), so keeping it
-        copy = 'docker exec ' + container.id + ' cmd.exe ver | findstr "Version"'
-        
-        out = subprocess.getoutput(copy)
-        #Example output:  100177631817
-        containerVersion = out[out.index('[')+1:out.index(']')]
-        containerVersionInt = int(out[out.index('[')+9:out.index(']')].replace(".", ""))
+        #copy result to host for analysis
+        copy = 'docker cp ' + container.id + ':\\result.txt ./result.txt'
+        subprocess.getoutput(copy)
 
-        if(hostVersionInt != containerVersionInt):
-            print(bcolors.WARNING + "\n⛔ The container is running another Windows version (" + containerVersion + ") than the host (" + hostVersion + ") might consider updating?" + bcolors.ENDC)
+        #regex to identify pending updates
+        update_pattern = re.compile(r'[(]KB[0-9]{7}[)]')
 
-        
+        #converting file to readable format
+        fread = open('result.txt', 'rb').read()
+        mytext = fread.decode('utf-16')
+        mytext = mytext.encode('ascii', 'ignore')
 
-    checkNewPrivileges(container)
+        #write decoded result to new file
+        fwrite = open('result2.txt', 'wb')
+        fwrite.write(mytext)
+        fwrite.close()
+
+        #search file for pending updates
+        for i, line in enumerate(open('result2.txt')):
+            for match in re.finditer(update_pattern, line):
+                if match not in pending_updates:
+                    update = match.group().replace('(', '')
+                    update = update.replace(')', '')
+                    pending_updates.append(update)
+
+        os.remove("result.txt")
+        os.remove("result2.txt")
+
+        #if there are pending updates available, print warning and search for related CVEs
+        if pending_updates:
+            print(bcolors.WARNING + "\n   Following updates are pending in container " + container.id[:12] + ": " + ', '.join(pending_updates) + bcolors.ENDC)
+            print(bcolors.WARNING + "\n   To update, run following commands in the container: " + bcolors.ENDC)
+            print(bcolors.WARNING + "   $ci = New-CimInstance -Namespace root/Microsoft/Windows/WindowsUpdate -ClassName MSFT_WUOperationsSession" + \
+                                            "\n   Invoke-CimMethod -InputObject $ci -MethodName ApplyApplicableUpdates" + \
+                                            "\n   Restart-Computer; exit" + bcolors.ENDC)
+            #print(bcolors.WARNING + "\n   " + bcolors.ENDC)
+            #print(bcolors.WARNING + "\n   " + bcolors.ENDC)
+
+
+
     checkContainerStorage(container)
     checkDockerPortMappings(container)
     checkIsolation(container)
